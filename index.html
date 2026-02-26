@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hollow Purple Web</title>
+  <meta name="description" content="Live hand-tracked Blue + Red merge into Hollow Purple with math-symbol effects.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="hud">
+      <p class="eyebrow">Technique Lab</p>
+      <h1>Blue + Red = Hollow Purple</h1>
+      <p class="hint">
+        Hold one hand for <strong>Blue</strong>, two hands for <strong>Blue + Red</strong>,
+        bring hands closer to <strong>merge</strong>, then open palm to <strong>release</strong>.
+        Spread fingers to expand Blue/Red, and increase two-hand spacing to expand Purple.
+        Blue is a circle-construction filled with parabolas, Red is a clean red globe, and Purple fuses both with theorem geometry.
+      </p>
+      <div class="controls">
+        <button id="startBtn" type="button">Start Camera</button>
+        <button id="resetBtn" type="button">Reset State</button>
+      </div>
+      <p id="statusText" class="status">Status: idle</p>
+      <p id="envHint" class="env-hint" hidden></p>
+
+      <div class="tune-panel">
+        <p class="tune-title">Global</p>
+        <label class="tune-row">
+          <span>Intensity</span>
+          <input id="intensityRange" type="range" min="60" max="180" value="100">
+        </label>
+        <label class="tune-row">
+          <span>Merge Distance</span>
+          <input id="mergeRange" type="range" min="12" max="30" value="19">
+        </label>
+        <label class="toggle-row">
+          <input id="landmarkToggle" type="checkbox">
+          <span>Show Hand Landmarks</span>
+        </label>
+
+        <p class="tune-title">Expandable Techniques</p>
+        <label class="tune-row">
+          <span>Blue Expand</span>
+          <input id="blueExpandRange" type="range" min="70" max="230" value="100">
+        </label>
+        <label class="tune-row">
+          <span>Red Expand</span>
+          <input id="redExpandRange" type="range" min="70" max="230" value="100">
+        </label>
+        <label class="tune-row">
+          <span>Purple Expand</span>
+          <input id="purpleExpandRange" type="range" min="70" max="260" value="110">
+        </label>
+      </div>
+    </section>
+
+    <section class="stage">
+      <video id="video" playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div id="phaseCallout" class="phase-callout" aria-live="polite"></div>
+      <div class="scanline" aria-hidden="true"></div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
