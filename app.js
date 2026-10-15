@@ -1,3 +1,5 @@
+import { fingerSpread, handGap, isOpenPalm, releaseEdge } from "./gestures.js";
+
 const videoEl = document.getElementById("video");
 const canvasEl = document.getElementById("canvas");
 const statusText = document.getElementById("statusText");
@@ -185,6 +187,7 @@ const state = {
   dualHoldMs: 0,
   mergeHoldMs: 0,
   dualLostMs: 0,
+  release: { sawClosed: false },
   anchors: {
     blue: { x: 0.68, y: 0.28 },
     red: { x: 0.32, y: 0.32 },
@@ -197,7 +200,8 @@ const state = {
   viewport: { w: 1, h: 1, dpr: 1 },
   settings: {
     intensity: 1,
-    mergeDistance: 0.19,
+    // Gap between index fingertips that starts a merge, in palm lengths.
+    mergeGap: 1.52,
     showLandmarks: false,
     expandBlue: 1,
     expandRed: 1,
@@ -276,6 +280,7 @@ function setPhase(next) {
     state.dualHoldMs = 0;
     state.mergeHoldMs = 0;
     state.dualLostMs = 0;
+    state.release.sawClosed = false;
 
     if (next === PHASE.BLUE) announceTechnique("blue");
     if (next === PHASE.DUAL) announceTechnique("red");
@@ -414,11 +419,8 @@ function updatePhase(dtMs, obs) {
       return;
     }
     let closeEnough = false;
-    if (obs.left && obs.right) {
-      const dx = obs.right.index.x - obs.left.index.x;
-      const dy = obs.right.index.y - obs.left.index.y;
-      const dist = Math.hypot(dx, dy);
-      closeEnough = dist < state.settings.mergeDistance;
+    if (obs.left && obs.right && obs.left !== obs.right) {
+      closeEnough = handGap(obs.left.points, obs.right.points) < state.settings.mergeGap;
     }
     state.mergeHoldMs += closeEnough ? dtMs : -dtMs * 0.9;
     state.mergeHoldMs = clamp(state.mergeHoldMs, 0, 1000);
@@ -432,7 +434,9 @@ function updatePhase(dtMs, obs) {
   }
 
   if (state.phase === PHASE.PURPLE_HOLD) {
-    if ((age > 0.55 && obs.openAny) || age > 2.4) setPhase(PHASE.PURPLE_RELEASE);
+    // Close your hands, then open them. Releases on its own after 4 s.
+    const opened = releaseEdge(state.release, obs.openAny);
+    if ((age > 0.55 && opened) || age > 4) setPhase(PHASE.PURPLE_RELEASE);
     return;
   }
 
@@ -451,41 +455,11 @@ function detectObservation(results) {
   const list = results.multiHandLandmarks || [];
   for (const lms of list) {
     const pts = lms.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-    const index = pts[8];
-    const wrist = pts[0];
-
-    let xMin = 1;
-    let yMin = 1;
-    let xMax = 0;
-    let yMax = 0;
-    for (const p of pts) {
-      xMin = Math.min(xMin, p.x);
-      yMin = Math.min(yMin, p.y);
-      xMax = Math.max(xMax, p.x);
-      yMax = Math.max(yMax, p.y);
-    }
-    const area = (xMax - xMin) * (yMax - yMin);
-    let openCount = 0;
-    const checks = [
-      [8, 6],
-      [12, 10],
-      [16, 14],
-      [20, 18],
-    ];
-    for (const [tip, pip] of checks) {
-      if (pts[tip].y < pts[pip].y - 0.015) openCount += 1;
-    }
-    const tips = [8, 12, 16, 20];
-    let spread = 0;
-    for (const tip of tips) {
-      spread += Math.hypot(pts[tip].x - wrist.x, pts[tip].y - wrist.y);
-    }
-    spread /= tips.length;
     hands.push({
       points: pts,
-      index,
-      openPalm: openCount >= 3 && area > 0.009,
-      spread,
+      index: pts[8],
+      openPalm: isOpenPalm(pts),
+      spread: fingerSpread(pts),
     });
   }
 
@@ -549,17 +523,14 @@ function updateAdaptiveLod(dtMs) {
 }
 
 function updateMathDrive(obs) {
-  const blueTarget = obs.right ? remap(obs.right.spread, 0.11, 0.34, 0, 1) : 0;
-  const redTarget = obs.left ? remap(obs.left.spread, 0.11, 0.34, 0, 1) : 0;
+  const blueTarget = obs.right ? remap(obs.right.spread, 1.3, 2.2, 0, 1) : 0;
+  const redTarget = obs.left ? remap(obs.left.spread, 1.3, 2.2, 0, 1) : 0;
 
   let purpleTarget = 0;
-  if (obs.left && obs.right) {
-    const dx = obs.right.index.x - obs.left.index.x;
-    const dy = obs.right.index.y - obs.left.index.y;
-    const dist = Math.hypot(dx, dy);
-    const distDrive = remap(dist, 0.1, 0.44, 0, 1);
+  if (obs.left && obs.right && obs.left !== obs.right) {
+    const distDrive = remap(handGap(obs.left.points, obs.right.points), 0.8, 3.4, 0, 1);
     const spreadMean = (obs.left.spread + obs.right.spread) * 0.5;
-    const spreadDrive = remap(spreadMean, 0.11, 0.35, 0, 1);
+    const spreadDrive = remap(spreadMean, 1.3, 2.2, 0, 1);
     purpleTarget = clamp(distDrive * 0.6 + spreadDrive * 0.4, 0, 1);
   }
 
@@ -578,12 +549,12 @@ function updateGestureExpansion(obs) {
   let targetPurple = state.settings.expandPurple;
 
   if ((state.phase === PHASE.BLUE || state.phase === PHASE.DUAL) && obs.right) {
-    const gBlue = remap(obs.right.spread, 0.11, 0.32, 0.75, 2.5);
+    const gBlue = remap(obs.right.spread, 1.3, 2.1, 0.75, 2.5);
     targetBlue = Math.max(targetBlue, gBlue);
   }
 
   if (state.phase === PHASE.DUAL && obs.left) {
-    const gRed = remap(obs.left.spread, 0.11, 0.32, 0.75, 2.5);
+    const gRed = remap(obs.left.spread, 1.3, 2.1, 0.75, 2.5);
     targetRed = Math.max(targetRed, gRed);
   }
 
@@ -595,11 +566,9 @@ function updateGestureExpansion(obs) {
     obs.left &&
     obs.right
   ) {
-    const dx = obs.right.index.x - obs.left.index.x;
-    const dy = obs.right.index.y - obs.left.index.y;
-    const handDist = Math.hypot(dx, dy);
-    const gPurpleDist = remap(handDist, 0.12, 0.42, 0.9, 2.8);
-    const gPurpleSpread = remap((obs.left.spread + obs.right.spread) * 0.5, 0.11, 0.34, 0.85, 2.4);
+    const gap = obs.left === obs.right ? 0 : handGap(obs.left.points, obs.right.points);
+    const gPurpleDist = remap(gap, 0.9, 3.2, 0.9, 2.8);
+    const gPurpleSpread = remap((obs.left.spread + obs.right.spread) * 0.5, 1.3, 2.2, 0.85, 2.4);
     targetPurple = Math.max(targetPurple, gPurpleDist, gPurpleSpread);
   }
 
@@ -1736,6 +1705,7 @@ function resetState() {
   state.dualHoldMs = 0;
   state.mergeHoldMs = 0;
   state.dualLostMs = 0;
+  state.release.sawClosed = false;
   state.anchors = {
     blue: { x: 0.68, y: 0.28 },
     red: { x: 0.32, y: 0.32 },
@@ -1773,7 +1743,8 @@ function bindUiControls() {
   });
 
   mergeRange.addEventListener("input", () => {
-    state.settings.mergeDistance = clamp(Number(mergeRange.value) / 100, 0.12, 0.3);
+    // Slider 12..30 maps to about 1 to 2.4 palm lengths.
+    state.settings.mergeGap = clamp(Number(mergeRange.value) / 12.5, 0.9, 2.5);
   });
 
   landmarkToggle.addEventListener("change", () => {
