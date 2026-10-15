@@ -15,6 +15,7 @@ const redExpandRange = document.getElementById("redExpandRange");
 const purpleExpandRange = document.getElementById("purpleExpandRange");
 
 const ctx = canvasEl.getContext("2d");
+const HANDS_VERSION = "0.4.1675469240";
 
 const SYMBOLS = [
   "f(x)",
@@ -1620,7 +1621,12 @@ function renderLoop() {
   drawLandmarks(obs);
   drawDebug(obs);
 
-  statusText.textContent = `Status: ${state.phase}`;
+  // Until the camera runs, leave start-up and error messages on screen;
+  // the loop used to overwrite them on the next frame.
+  if (state.started) {
+    const missing = state.techniqueAudioMissing.length ? ` (missing audio: ${state.techniqueAudioMissing.join(", ")})` : "";
+    statusText.textContent = `Status: ${state.phase}${missing}`;
+  }
   requestAnimationFrame(renderLoop);
 }
 
@@ -1668,7 +1674,8 @@ async function startCamera() {
   await videoEl.play();
 
   handsModel = new Hands({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+    // Same pinned version as the script tag: the model files must match hands.js.
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${HANDS_VERSION}/${file}`,
   });
   handsModel.setOptions({
     maxNumHands: 2,
@@ -1771,12 +1778,57 @@ function bindUiControls() {
   state.runtimeExpand.purple = state.settings.expandPurple;
 }
 
+// getUserMedia errors, in words someone can act on.
+// https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia#exceptions
+function cameraErrorText(err) {
+  switch (err && err.name) {
+    case "NotAllowedError":
+      return "Camera blocked. Allow the camera for this site (the icon in the address bar), then press Start Camera again.";
+    case "NotFoundError":
+    case "OverconstrainedError":
+      return "No camera found. Plug one in or turn it on, then press Start Camera again.";
+    case "NotReadableError":
+    case "AbortError":
+      return "The camera is busy. Close other apps or tabs using it (video calls, other camera pages), then try again.";
+    case "SecurityError":
+      return "Camera needs HTTPS or localhost.";
+    default:
+      if (typeof Hands === "undefined" || typeof Camera === "undefined") {
+        return "Hand tracking didn't load. Check your connection and reload the page.";
+      }
+      return `Camera start failed: ${(err && err.message) || "unknown error"}`;
+  }
+}
+
 startBtn.addEventListener("click", async () => {
+  startBtn.disabled = true;
+  statusText.textContent = "Status: starting camera...";
   try {
     await startCamera();
   } catch (err) {
     console.error(err);
-    statusText.textContent = "Status: camera start failed";
+    stopStream();
+    statusText.textContent = `Status: ${cameraErrorText(err)}`;
+  } finally {
+    startBtn.disabled = state.started;
+  }
+});
+
+function stopStream() {
+  const stream = videoEl.srcObject;
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  videoEl.srcObject = null;
+}
+
+// Stop sending frames to the hand model while the tab is hidden, so a
+// background tab doesn't keep the GPU and camera pipeline busy.
+document.addEventListener("visibilitychange", () => {
+  if (!camera || !state.started) return;
+  if (document.hidden) {
+    camera.stop();
+  } else {
+    camera.start();
+    state.handsObs = { count: 0, hands: [], left: null, right: null, openAny: false, points: [] };
   }
 });
 
