@@ -1,4 +1,5 @@
-import { fingerSpread, handGap, isOpenPalm, releaseEdge } from "./gestures.js";
+import { handGap } from "./gestures.js";
+import { PHASE, detectObservation, resetSequence, stepSequence } from "./sequence.js";
 
 const videoEl = document.getElementById("video");
 const canvasEl = document.getElementById("canvas");
@@ -139,16 +140,6 @@ const PURPLE_EQUATIONS = [
   "Omega fusion",
 ];
 
-const PHASE = {
-  IDLE: "idle",
-  BLUE: "blue",
-  DUAL: "dual",
-  MERGE: "merge",
-  PURPLE_HOLD: "purple_hold",
-  PURPLE_RELEASE: "purple_release",
-  TAIL: "tail",
-};
-
 const TECHNIQUE_CALLOUTS = {
   blue: {
     jp: "術式順転「蒼」",
@@ -274,19 +265,10 @@ function phaseAgeSec() {
   return (state.nowMs - state.phaseStartMs) / 1000;
 }
 
-function setPhase(next) {
-  if (next !== state.phase) {
-    state.phase = next;
-    state.phaseStartMs = state.nowMs;
-    state.dualHoldMs = 0;
-    state.mergeHoldMs = 0;
-    state.dualLostMs = 0;
-    state.release.sawClosed = false;
-
-    if (next === PHASE.BLUE) announceTechnique("blue");
-    if (next === PHASE.DUAL) announceTechnique("red");
-    if (next === PHASE.PURPLE_HOLD) announceTechnique("purple");
-  }
+function announcePhase(phase) {
+  if (phase === PHASE.BLUE) announceTechnique("blue");
+  if (phase === PHASE.DUAL) announceTechnique("red");
+  if (phase === PHASE.PURPLE_HOLD) announceTechnique("purple");
 }
 
 async function mediaExists(url) {
@@ -394,88 +376,8 @@ function announceTechnique(key) {
 }
 
 function updatePhase(dtMs, obs) {
-  const age = phaseAgeSec();
-
-  if (state.phase === PHASE.IDLE) {
-    if (obs.count >= 1) setPhase(PHASE.BLUE);
-    return;
-  }
-
-  if (state.phase === PHASE.BLUE) {
-    state.dualHoldMs += obs.count >= 2 ? dtMs : -dtMs * 0.65;
-    state.dualHoldMs = clamp(state.dualHoldMs, 0, 1200);
-    if (state.dualHoldMs > 180) setPhase(PHASE.DUAL);
-    return;
-  }
-
-  if (state.phase === PHASE.DUAL) {
-    if (obs.count === 0) {
-      setPhase(PHASE.BLUE);
-      return;
-    }
-    state.dualLostMs += obs.count < 2 ? dtMs : -dtMs;
-    state.dualLostMs = clamp(state.dualLostMs, 0, 1400);
-    if (state.dualLostMs > 260) {
-      setPhase(PHASE.BLUE);
-      return;
-    }
-    let closeEnough = false;
-    if (obs.left && obs.right && obs.left !== obs.right) {
-      closeEnough = handGap(obs.left.points, obs.right.points) < state.settings.mergeGap;
-    }
-    state.mergeHoldMs += closeEnough ? dtMs : -dtMs * 0.9;
-    state.mergeHoldMs = clamp(state.mergeHoldMs, 0, 1000);
-    if (state.mergeHoldMs > 120) setPhase(PHASE.MERGE);
-    return;
-  }
-
-  if (state.phase === PHASE.MERGE) {
-    if (age > 0.32) setPhase(PHASE.PURPLE_HOLD);
-    return;
-  }
-
-  if (state.phase === PHASE.PURPLE_HOLD) {
-    // Close your hands, then open them. Releases on its own after 4 s.
-    const opened = releaseEdge(state.release, obs.openAny);
-    if ((age > 0.55 && opened) || age > 4) setPhase(PHASE.PURPLE_RELEASE);
-    return;
-  }
-
-  if (state.phase === PHASE.PURPLE_RELEASE) {
-    if (age > 1.85) setPhase(PHASE.TAIL);
-    return;
-  }
-
-  if (state.phase === PHASE.TAIL) {
-    if (age > 1.2 && obs.count === 0) setPhase(PHASE.IDLE);
-  }
-}
-
-function detectObservation(results) {
-  const hands = [];
-  const list = results.multiHandLandmarks || [];
-  for (const lms of list) {
-    const pts = lms.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-    hands.push({
-      points: pts,
-      index: pts[8],
-      openPalm: isOpenPalm(pts),
-      spread: fingerSpread(pts),
-    });
-  }
-
-  hands.sort((a, b) => a.index.x - b.index.x);
-  const left = hands[0] || null;
-  const right = hands[hands.length - 1] || null;
-
-  return {
-    count: hands.length,
-    hands,
-    left,
-    right,
-    points: hands.flatMap((h) => h.points),
-    openAny: hands.some((h) => h.openPalm),
-  };
+  const entered = stepSequence(state, dtMs, obs, state.nowMs, state.settings.mergeGap);
+  if (entered) announcePhase(entered);
 }
 
 function remap(v, inMin, inMax, outMin, outMax) {
@@ -1707,12 +1609,7 @@ async function startCamera() {
 }
 
 function resetState() {
-  state.phase = PHASE.IDLE;
-  state.phaseStartMs = performance.now();
-  state.dualHoldMs = 0;
-  state.mergeHoldMs = 0;
-  state.dualLostMs = 0;
-  state.release.sawClosed = false;
+  resetSequence(state, performance.now());
   state.anchors = {
     blue: { x: 0.68, y: 0.28 },
     red: { x: 0.32, y: 0.32 },
