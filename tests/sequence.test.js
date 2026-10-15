@@ -73,3 +73,14 @@ test("observations order hands left to right by index fingertip", () => {
   assert.equal(obs.left.index.x, 0.2);
   assert.equal(obs.openAny, true);
 });
+
+test("the demo script walks the sequence all the way to release", async () => {
+  const { demoObservationAt, DEMO_LENGTH_MS } = await import("../demo.js");
+  const seq = createSequence(0);
+  const seen = [];
+  for (let ms = 16; ms <= DEMO_LENGTH_MS; ms += 16) {
+    const phase = stepSequence(seq, 16, demoObservationAt(ms), ms, MERGE_GAP);
+    if (phase) seen.push(phase);
+  }
+  assert.deepEqual(seen.slice(0, 5), [PHASE.BLUE, PHASE.DUAL, PHASE.MERGE, PHASE.PURPLE_HOLD, PHASE.PURPLE_RELEASE]);
+});

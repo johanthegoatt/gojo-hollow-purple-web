@@ -16,7 +16,7 @@ cd "gojo-hollow-purple-web"
 npx serve .
 ```
 
-Then open the local URL in Chrome/Edge and click **Start Camera**.
+Then open the local URL in Chrome/Edge and click **Start Camera**. No camera, or rather not? **Watch Demo** runs the whole technique with scripted hands through the same sequence and renderer.
 
 ## Japanese Voice Clips
 

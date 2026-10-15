@@ -1,5 +1,6 @@
 import { handGap } from "./gestures.js";
 import { PHASE, detectObservation, resetSequence, stepSequence } from "./sequence.js";
+import { DEMO_LENGTH_MS, demoObservationAt } from "./demo.js";
 
 const videoEl = document.getElementById("video");
 const canvasEl = document.getElementById("canvas");
@@ -8,6 +9,7 @@ const envHint = document.getElementById("envHint");
 const phaseCalloutEl = document.getElementById("phaseCallout");
 const startBtn = document.getElementById("startBtn");
 const resetBtn = document.getElementById("resetBtn");
+const demoBtn = document.getElementById("demoBtn");
 const intensityRange = document.getElementById("intensityRange");
 const mergeRange = document.getElementById("mergeRange");
 const landmarkToggle = document.getElementById("landmarkToggle");
@@ -1512,7 +1514,8 @@ function renderLoop() {
   state.prevMs = state.nowMs;
   updateAdaptiveLod(dt);
 
-  const obs = state.handsObs;
+  if (demo.active && state.nowMs - demo.startMs > DEMO_LENGTH_MS) stopDemo();
+  const obs = demo.active ? demoObservationAt(state.nowMs - demo.startMs) : state.handsObs;
   updateAnchors(obs);
   updatePhase(dt, obs);
   updateMathDrive(obs);
@@ -1525,12 +1528,33 @@ function renderLoop() {
 
   // Until the camera runs, leave start-up and error messages on screen;
   // the loop used to overwrite them on the next frame.
-  if (state.started) {
+  if (demo.active) {
+    statusText.textContent = `Status: demo, ${state.phase}`;
+  } else if (state.started) {
     const missing = state.techniqueAudioMissing.length ? ` (missing audio: ${state.techniqueAudioMissing.join(", ")})` : "";
     statusText.textContent = `Status: ${state.phase}${missing}`;
   }
   requestAnimationFrame(renderLoop);
 }
+
+const demo = { active: false, startMs: 0 };
+
+function startDemo() {
+  resetState();
+  demo.active = true;
+  demo.startMs = performance.now();
+  demoBtn.textContent = "Stop Demo";
+  primeTechniqueAudio();
+}
+
+function stopDemo() {
+  demo.active = false;
+  demoBtn.textContent = "Watch Demo";
+  resetState();
+  statusText.textContent = state.started ? "Status: camera live" : "Status: demo finished. Start the camera to try it yourself.";
+}
+
+demoBtn.addEventListener("click", () => (demo.active ? stopDemo() : startDemo()));
 
 function resizeCanvas() {
   const rect = canvasEl.getBoundingClientRect();
@@ -1698,6 +1722,7 @@ function cameraErrorText(err) {
 }
 
 startBtn.addEventListener("click", async () => {
+  if (demo.active) stopDemo();
   startBtn.disabled = true;
   statusText.textContent = "Status: starting camera...";
   try {
